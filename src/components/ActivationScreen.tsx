@@ -6,7 +6,6 @@ import { supabase } from '../lib/supabase';
 interface ActivationScreenProps {
   onActivateSuccess: () => void;
   onLogout: () => void;
-  onDevBypass?: () => void;
 }
 
 // Simple SHA-256 hashing function for browser
@@ -18,10 +17,19 @@ async function sha256(message: string) {
   return hashHex;
 }
 
-export const ActivationScreen: React.FC<ActivationScreenProps> = ({ onActivateSuccess, onLogout, onDevBypass }) => {
+export const ActivationScreen: React.FC<ActivationScreenProps> = ({ onActivateSuccess, onLogout }) => {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const getOrCreateDeviceId = () => {
+    let deviceId = localStorage.getItem('category_clash_device_id');
+    if (!deviceId) {
+      deviceId = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('category_clash_device_id', deviceId);
+    }
+    return deviceId;
+  };
 
   const handleActivate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,47 +41,46 @@ export const ActivationScreen: React.FC<ActivationScreenProps> = ({ onActivateSu
 
     setLoading(true);
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData?.user) throw new Error('يرجى تسجيل الدخول أولاً');
-      const userId = userData.user.id;
-
-      // 1. Hash the code
+      const deviceId = getOrCreateDeviceId();
       const codeHash = await sha256(code.trim().toUpperCase());
 
-      // 2. Check if code exists and is unused
+      // 1. Check if the code exists and get its status
       const { data: codesData, error: codesError } = await supabase
         .from('activation_codes')
         .select('*')
         .eq('code_hash', codeHash)
-        .eq('status', 'unused')
         .single();
 
       if (codesError || !codesData) {
-        throw new Error('الكود غير صحيح أو مستخدم مسبقاً');
+        throw new Error('الكود غير صحيح');
       }
 
-      // 3. Update the code to 'used'
-      const { error: updateCodeError } = await supabase
-        .from('activation_codes')
-        .update({
-          status: 'used',
-          used_by: userId,
-          used_at: new Date().toISOString(),
-        })
-        .eq('id', codesData.id);
+      // 2. Determine if we can use it
+      if (codesData.status === 'unused') {
+        // Claim the code for this device
+        const { error: updateCodeError } = await supabase
+          .from('activation_codes')
+          .update({
+            status: 'used',
+            used_by: deviceId, // We use deviceId instead of a user ID now
+            used_at: new Date().toISOString(),
+          })
+          .eq('id', codesData.id);
 
-      if (updateCodeError) throw new Error('حدث خطأ أثناء تفعيل الكود');
+        if (updateCodeError) throw new Error('حدث خطأ أثناء تفعيل الكود، الرجاء المحاولة مرة أخرى.');
+        
+        // Save the code locally so they don't have to enter it again
+        localStorage.setItem('active_game_code', code.trim().toUpperCase());
+        onActivateSuccess();
 
-      // 4. Update user profile
-      const { error: profileError } = await supabase
-        .from('user_profiles')
-        .update({ access_granted: true })
-        .eq('id', userId);
-
-      if (profileError) throw new Error('تم تفعيل الكود، لكن حدث خطأ بتحديث حسابك.');
-
-      // 5. Success
-      onActivateSuccess();
+      } else if (codesData.status === 'used' && codesData.used_by === deviceId) {
+        // They are returning on the same device
+        localStorage.setItem('active_game_code', code.trim().toUpperCase());
+        onActivateSuccess();
+      } else {
+        // Used by someone else
+        throw new Error('هذا الكود مستخدم مسبقاً على جهاز آخر.');
+      }
 
     } catch (err: any) {
       setError(err.message || 'حدث خطأ ما');
@@ -157,17 +164,6 @@ export const ActivationScreen: React.FC<ActivationScreenProps> = ({ onActivateSu
 
             {/* Store Link Container */}
             <div className="mt-8 pt-6 border-t border-white/10 flex flex-col items-center">
-              {/* Dev Bypass */}
-              {onDevBypass && (
-                <button
-                  type="button"
-                  onClick={onDevBypass}
-                  className="w-full bg-yellow-500/10 text-yellow-300 border border-yellow-500/30 font-bold py-3 px-4 rounded-2xl shadow hover:bg-yellow-500/20 transition-all flex items-center justify-center gap-2 mb-6"
-                >
-                  تجاوز التفعيل (للمطورين)
-                </button>
-              )}
-
               <p className="text-[#FFF8E7]/70 text-sm mb-4 font-medium px-4">
                 لم تشتري اللعبة بعد؟ قم بالشراء الآن وبيوصلك كود اللعب فورياً وللأبد
               </p>

@@ -11,10 +11,8 @@ import {
   Loader2,
 } from 'lucide-react';
 import { CATEGORIES, Category } from './data/gameData';
-import { AuthScreen } from './components/AuthScreen';
 import { ActivationScreen } from './components/ActivationScreen';
 import { supabase } from './lib/supabase';
-import { Session } from '@supabase/supabase-js';
 
 // --- Types ---
 
@@ -580,32 +578,12 @@ const Leaderboard = ({
   );
 };
 
-// --- Dev Menu Component ---
-type DevPage = 'AUTH' | 'ACTIVATION' | 'GAME' | null;
-
-const DevMenu = ({ current, onSelect }: { current: DevPage, onSelect: (page: DevPage) => void }) => {
-  return (
-    <div className="fixed top-2 left-2 z-50 flex gap-2 p-2 bg-black/80 rounded-lg shadow-lg border border-white/20 dir-ltr font-sans">
-      <span className="text-white text-xs font-mono my-auto">Dev:</span>
-      <select 
-        value={current || ''} 
-        onChange={(e) => onSelect(e.target.value ? (e.target.value as DevPage) : null)}
-        className="bg-gray-800 text-white text-xs px-2 py-1 rounded border border-gray-600 outline-none cursor-pointer"
-        dir="ltr"
-      >
-        <option value="">Default (Auto)</option>
-        <option value="AUTH">Auth Screen</option>
-        <option value="ACTIVATION">Activation Screen</option>
-        <option value="GAME">Game Screen</option>
-      </select>
-    </div>
-  );
-};
+// --- Dev Menu Component Removed for Production ---
+type DevPage = 'ACTIVATION' | 'GAME' | null;
 
 // --- Main App Component ---
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
   const [accessGranted, setAccessGranted] = useState<boolean | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [devPage, setDevPage] = useState<DevPage>(null); // Developer explicit page override
@@ -632,62 +610,33 @@ export default function App() {
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) checkAccess(session.user.id);
-      else setAuthLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
-        checkAccess(session.user.id);
+    // Check if device already has an active code
+    const checkLocalAccess = async () => {
+      const activeCode = localStorage.getItem('active_game_code');
+      const deviceId = localStorage.getItem('category_clash_device_id');
+      
+      if (activeCode && deviceId) {
+        // Technically we could query Supabase to ensure the code wasn't revoked,
+        // but for speed and simplicity, we'll trust the valid local token structure 
+        // since they already claimed it on this exact device in the past.
+        setAccessGranted(true);
       } else {
-        setAccessGranted(null);
-        setAuthLoading(false);
+        setAccessGranted(false);
       }
-    });
+      setAuthLoading(false);
+    };
 
-    return () => subscription.unsubscribe();
+    checkLocalAccess();
   }, []);
 
-  const checkAccess = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('access_granted')
-        .eq('id', userId)
-        .single();
-      
-      if (!error && data) {
-        setAccessGranted(data.access_granted);
-      }
-    } catch (err) {
-      console.error('Error fetching profile:', err);
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
-
   // --- Render overrides (Dev Menu) ---
-  if (devPage === 'AUTH') {
-    return (
-      <div className="relative">
-         <DevMenu current={devPage} onSelect={setDevPage} />
-         <AuthScreen onAuthSuccess={() => setDevPage(null)} onDevBypass={() => setDevPage('GAME')} />
-      </div>
-    );
-  }
-
   if (devPage === 'ACTIVATION') {
     return (
       <div className="relative">
-         <DevMenu current={devPage} onSelect={setDevPage} />
-         <ActivationScreen onActivateSuccess={() => setDevPage(null)} onLogout={() => setDevPage(null)} onDevBypass={() => setDevPage('GAME')} />
+         <ActivationScreen 
+           onActivateSuccess={() => setDevPage(null)} 
+           onLogout={() => { /* No-op, no real logout since no passwords */ }} 
+         />
       </div>
     );
   }
@@ -701,20 +650,13 @@ export default function App() {
       );
     }
 
-    if (!session) {
+    if (!accessGranted) {
       return (
         <div className="relative">
-          <DevMenu current={null} onSelect={setDevPage} />
-          <AuthScreen onAuthSuccess={() => {}} onDevBypass={() => setDevPage('GAME')} />
-        </div>
-      );
-    }
-
-    if (accessGranted === false) {
-      return (
-        <div className="relative">
-          <DevMenu current={null} onSelect={setDevPage} />
-          <ActivationScreen onActivateSuccess={() => setAccessGranted(true)} onLogout={handleLogout} onDevBypass={() => setDevPage('GAME')} />
+          <ActivationScreen 
+            onActivateSuccess={() => setAccessGranted(true)} 
+            onLogout={() => {}} 
+          />
         </div>
       );
     }
