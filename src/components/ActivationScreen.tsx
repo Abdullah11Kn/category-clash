@@ -22,15 +22,6 @@ export const ActivationScreen: React.FC<ActivationScreenProps> = ({ onActivateSu
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const getOrCreateDeviceId = () => {
-    let deviceId = localStorage.getItem('category_clash_device_id');
-    if (!deviceId) {
-      deviceId = 'device_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem('category_clash_device_id', deviceId);
-    }
-    return deviceId;
-  };
-
   const handleActivate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -41,10 +32,9 @@ export const ActivationScreen: React.FC<ActivationScreenProps> = ({ onActivateSu
 
     setLoading(true);
     try {
-      const deviceId = getOrCreateDeviceId();
       const codeHash = await sha256(code.trim().toUpperCase());
 
-      // 1. Check if the code exists and get its status
+      // 1. Check if the code exists in the database
       const { data: codesData, error: codesError } = await supabase
         .from('activation_codes')
         .select('*')
@@ -55,32 +45,24 @@ export const ActivationScreen: React.FC<ActivationScreenProps> = ({ onActivateSu
         throw new Error('الكود غير صحيح');
       }
 
-      // 2. Determine if we can use it
+      // 2. If it is the first time anyone is using it, mark it as used 
+      //    so the store owner knows it was activated.
       if (codesData.status === 'unused') {
-        // Claim the code for this device
         const { error: updateCodeError } = await supabase
           .from('activation_codes')
           .update({
             status: 'used',
-            used_by: deviceId, // We use deviceId instead of a user ID now
             used_at: new Date().toISOString(),
           })
           .eq('id', codesData.id);
 
         if (updateCodeError) throw new Error('حدث خطأ أثناء تفعيل الكود، الرجاء المحاولة مرة أخرى.');
-        
-        // Save the code locally so they don't have to enter it again
-        localStorage.setItem('active_game_code', code.trim().toUpperCase());
-        onActivateSuccess();
-
-      } else if (codesData.status === 'used' && codesData.used_by === deviceId) {
-        // They are returning on the same device
-        localStorage.setItem('active_game_code', code.trim().toUpperCase());
-        onActivateSuccess();
-      } else {
-        // Used by someone else
-        throw new Error('هذا الكود مستخدم مسبقاً على جهاز آخر.');
       }
+      
+      // 3. Always allow access as long as the code is in the database!
+      // Save it locally so they don't have to type it on this specific device again
+      localStorage.setItem('active_game_code', code.trim().toUpperCase());
+      onActivateSuccess();
 
     } catch (err: any) {
       setError(err.message || 'حدث خطأ ما');

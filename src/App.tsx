@@ -613,12 +613,10 @@ export default function App() {
     // Check if device already has an active code
     const checkLocalAccess = async () => {
       const activeCode = localStorage.getItem('active_game_code');
-      const deviceId = localStorage.getItem('category_clash_device_id');
       
-      if (activeCode && deviceId) {
+      if (activeCode) {
         // Technically we could query Supabase to ensure the code wasn't revoked,
-        // but for speed and simplicity, we'll trust the valid local token structure 
-        // since they already claimed it on this exact device in the past.
+        // but for speed and simplicity, we'll trust the valid local token structure.
         setAccessGranted(true);
       } else {
         setAccessGranted(false);
